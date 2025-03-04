@@ -1,0 +1,26 @@
+---
+title: "Notes"
+author: "Divij Yanduru"
+date: "2025-03-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Make sure to mention base R spline function for non sparse data.
+Make sure to make one for non yield regression
+Normal usage of convexity if needed and modified duration calculation if needed
+Duration Matching and Immunization and cash flow matching. Make it complex further.
+Cash flow matching function - c-strips and Bond Ladder.
+
+
+
+
+
+
+
+
+
+
