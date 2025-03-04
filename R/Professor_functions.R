@@ -317,3 +317,149 @@ predict_spot_rates <- function(yield_model_result, new_ttm) {
     predicted_spot = predicted_spots
   ))
 }
+
+
+bond.duration.2nd <- function(settle, mature, coupon, freq, yield, convention, comp.freq) {
+  mod_duration <- bond.duration(settle, mature, coupon, freq, yield, convention, comp.freq, modified = TRUE)
+  convexity <- bond.convexity(settle, mature, coupon, freq, yield, convention, comp.freq)
+  second_order <- mod_duration + convexity * (1 + yield / comp.freq) / (1 + yield / comp.freq)
+
+  return(second_order)
+}
+
+duration_match <- function(durations, convexities, target_duration,
+                                         maturities = NULL, coupons = NULL, prices = NULL, yields = NULL) {
+  # Input:
+  #   durations: vector of modified durations for each bond
+  #   convexities: vector of convexities for each bond
+  #   target_duration: target modified duration for the portfolio
+  #   maturities, coupons, prices, yields: optional vectors for additional info
+
+  # Check that durations and convexities have the same length
+  if (length(durations) != length(convexities)) {
+    stop("Duration and convexity vectors must have the same length")
+  }
+
+  # number of bonds
+  nparm <- length(durations)
+
+  # objective function to MAXIMIZE convexity (nloptr minimizes, so we use negative)
+  eval_f <- function(x) {
+    return(-sum(x * convexities))
+  }
+
+  # gradient of the objective function
+  eval_grad_f <- function(x) {
+    return(-convexities)
+  }
+
+  # duration constraint function (duration = target)
+  eval_g_eq_dur <- function(x) {
+    return(sum(x * durations) - target_duration)
+  }
+
+  # gradient of duration constraint
+  eval_jac_g_eq_dur <- function(x) {
+    return(durations)
+  }
+
+  # weight sum constraint function (weights sum to 1)
+  eval_g_eq_sum <- function(x) {
+    return(sum(x) - 1)
+  }
+
+  # gradient of weight sum constraint
+  eval_jac_g_eq_sum <- function(x) {
+    return(rep(1, nparm))
+  }
+
+  # combine both equality constraints
+  eval_g_eq <- function(x) {
+    return(c(eval_g_eq_dur(x), eval_g_eq_sum(x)))
+  }
+
+  # combine both equality constraint gradients
+  eval_jac_g_eq <- function(x) {
+    return(rbind(durations, rep(1, nparm)))
+  }
+
+  # lower bounds (no short sales)
+  lb <- rep(0, nparm)
+
+  # upper bounds (can be up to 100% in any one bond)
+  ub <- rep(1, nparm)
+
+  # starting weights (equal weight)
+  wts <- rep(1/nparm, nparm)
+
+  # Check if duration target is achievable
+  min_dur <- min(durations)
+  max_dur <- max(durations)
+  if (target_duration < min_dur || target_duration > max_dur) {
+    warning(paste("Target duration of", target_duration,
+                  "is outside the range of available bond durations [",
+                  min_dur, ",", max_dur, "]. No exact solution possible."))
+  }
+
+  # algorithm and controls
+  opts <- list(
+    "algorithm" = "NLOPT_LD_SLSQP",
+    "xtol_rel" = 1.0e-8,
+    "print_level" = 0,  # set to higher number for more output
+    "check_derivatives" = TRUE
+  )
+
+  # Run the optimizer, wrapped in tryCatch to handle potential errors
+  result <- tryCatch({
+    # Run the optimizer
+    nlopt <- nloptr::nloptr(
+      x0 = wts,
+      eval_f = eval_f,
+      eval_grad_f = eval_grad_f,
+      lb = lb,
+      ub = ub,
+      eval_g_eq = eval_g_eq,
+      eval_jac_g_eq = eval_jac_g_eq,
+      opts = opts
+    )
+
+    # Get the optimal weights
+    optimal_weights <- nlopt$solution
+
+    # Create names for weights if maturities are provided
+    if (!is.null(maturities)) {
+      names(optimal_weights) <- as.character(maturities)
+    } else {
+      names(optimal_weights) <- paste0("Bond_", 1:nparm)
+    }
+
+    # Calculate portfolio duration and convexity
+    portfolio_duration <- sum(optimal_weights * durations)
+    portfolio_convexity <- sum(optimal_weights * convexities)
+
+    # Return results
+    list(
+      weights = optimal_weights,
+      portfolio_duration = portfolio_duration,
+      portfolio_convexity = portfolio_convexity,
+      target_duration = target_duration,
+      duration_error = portfolio_duration - target_duration,
+      optimization_status = nlopt$status,
+      optimization_message = nlopt$message
+    )
+  }, error = function(e) {
+    # Return error information if optimization fails
+    list(
+      weights = rep(NA, nparm),
+      portfolio_duration = NA,
+      portfolio_convexity = NA,
+      target_duration = target_duration,
+      duration_error = NA,
+      optimization_status = "Error",
+      optimization_message = paste("Optimization failed:", e$message)
+    )
+  })
+
+  return(result)
+}
+
