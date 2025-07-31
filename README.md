@@ -115,7 +115,7 @@ This package is licensed under the terms specified in the DESCRIPTION file.
 
 ## Author
 
-Jane Doe (jane@example.com)
+Divij Yanduru (sy328@duke.edu)
 
 ## Version
 
